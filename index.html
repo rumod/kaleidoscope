@@ -114,6 +114,19 @@
       const offscreenRef = useRef(null);
       const rafRef = useRef(null);
 
+      const createBead = useCallback((customProps = {}) => ({
+        x: (Math.random() - 0.5) * 350,
+        y: (Math.random() - 0.5) * 350,
+        vx: (Math.random() - 0.5) * 0.8, // Slower initial speed
+        vy: (Math.random() - 0.5) * 0.8,
+        size: Math.random() * 3 + 1, // Halved size (from 2-8 to 1-4)
+        color: palette[Math.floor(Math.random() * palette.length)],
+        rot: Math.random() * Math.PI * 2,
+        vRot: (Math.random() - 0.5) * 0.02, // Slower rotation
+        type: ['circle', 'rect', 'star', 'poly'][Math.floor(Math.random() * 4)],
+        ...customProps
+      }), [palette]);
+
       useEffect(() => {
         if (videoStream && !videoRef.current) {
           const video = document.createElement('video');
@@ -125,19 +138,35 @@
       }, [videoStream]);
 
       useEffect(() => {
-        const createBead = () => ({
-          x: (Math.random() - 0.5) * 350,
-          y: (Math.random() - 0.5) * 350,
-          vx: (Math.random() - 0.5) * 1.5,
-          vy: (Math.random() - 0.5) * 1.5,
-          size: Math.random() * 6 + 2,
-          color: palette[Math.floor(Math.random() * palette.length)],
-          rot: Math.random() * Math.PI * 2,
-          vRot: (Math.random() - 0.5) * 0.04,
-          type: ['circle', 'rect', 'star'][Math.floor(Math.random() * 3)]
+        beadsRef.current = Array.from({ length: 80 }, () => createBead());
+      }, [palette, createBead]);
+
+      const handlePointerDown = (e) => {
+        // Create 1-4 new beads on touch
+        const count = Math.floor(Math.random() * 4) + 1;
+        const newBeads = [];
+        for (let i = 0; i < count; i++) {
+          newBeads.push(createBead({
+            // Spawn near touch point if possible, or just random
+            vx: (Math.random() - 0.5) * 5,
+            vy: (Math.random() - 0.5) * 5,
+            size: Math.random() * 5 + 1 // Varied sizes for new ones
+          }));
+        }
+        
+        // Add impulse to existing ones
+        beadsRef.current.forEach(b => { 
+          b.vx += (Math.random() - 0.5) * 3; 
+          b.vy += (Math.random() - 0.5) * 3; 
         });
-        beadsRef.current = Array.from({ length: 60 }, createBead);
-      }, [palette]);
+
+        beadsRef.current = [...beadsRef.current, ...newBeads];
+        
+        // Cap the count to prevent lag
+        if (beadsRef.current.length > 250) {
+          beadsRef.current.splice(0, beadsRef.current.length - 250);
+        }
+      };
 
       const animate = useCallback(() => {
         const canvas = canvasRef.current;
@@ -155,9 +184,10 @@
         if (off.width !== offSize) { off.width = off.height = offSize; }
         const octx = off.getContext('2d');
 
+        // Physics: Super Slow Drifting
         beadsRef.current.forEach(b => {
-          b.vx *= 0.992; b.vy *= 0.992;
-          b.vy += 0.035;
+          b.vx *= 0.995; b.vy *= 0.995; // Higher friction for slower motion
+          b.vy += 0.012; // Lowered gravity (ethereal feel)
           b.x += b.vx; b.y += b.vy;
           b.rot += b.vRot;
           const d = Math.hypot(b.x, b.y);
@@ -165,7 +195,7 @@
             const angle = Math.atan2(b.y, b.x);
             b.x = Math.cos(angle) * radius;
             b.y = Math.sin(angle) * radius;
-            b.vx *= -0.6; b.vy *= -0.6;
+            b.vx *= -0.5; b.vy *= -0.5; // Very soft bounce
           }
         });
 
@@ -183,11 +213,27 @@
           octx.save();
           octx.translate(b.x, b.y); octx.rotate(b.rot);
           octx.fillStyle = b.color;
-          octx.shadowBlur = 8; octx.shadowColor = b.color;
-          if (b.type === 'circle') { octx.beginPath(); octx.arc(0,0,b.size,0,Math.PI*2); octx.fill(); }
-          else if (b.type === 'star') {
-            octx.beginPath(); for(let i=0; i<10; i++) { const r = i%2===0?b.size:b.size*0.4; const a=i*Math.PI/5; octx.lineTo(Math.cos(a)*r, Math.sin(a)*r); } octx.fill();
-          } else { octx.fillRect(-b.size/2, -b.size/2, b.size, b.size); }
+          octx.shadowBlur = 10; octx.shadowColor = b.color;
+          if (b.type === 'circle') { 
+            octx.beginPath(); octx.arc(0,0,b.size,0,Math.PI*2); octx.fill(); 
+          } else if (b.type === 'star') {
+            octx.beginPath(); 
+            for(let i=0; i<10; i++) { 
+              const r = i%2===0?b.size:b.size*0.4; 
+              const a=i*Math.PI/5; 
+              octx.lineTo(Math.cos(a)*r, Math.sin(a)*r); 
+            } 
+            octx.fill();
+          } else if (b.type === 'poly') {
+            octx.beginPath();
+            for(let i=0; i<3; i++) {
+              const a = i * (Math.PI * 2 / 3);
+              octx.lineTo(Math.cos(a)*b.size, Math.sin(a)*b.size);
+            }
+            octx.fill();
+          } else { 
+            octx.fillRect(-b.size/2, -b.size/2, b.size, b.size); 
+          }
           octx.restore();
         });
         octx.restore();
@@ -210,9 +256,7 @@
         return () => cancelAnimationFrame(rafRef.current);
       }, [animate]);
 
-      return <canvas ref={canvasRef} onPointerDown={() => {
-        beadsRef.current.forEach(b => { b.vx += (Math.random()-0.5)*8; b.vy += (Math.random()-0.5)*8; });
-      }} />;
+      return <canvas ref={canvasRef} onPointerDown={handlePointerDown} />;
     };
 
     const App = () => {
@@ -255,7 +299,7 @@
                 <i className="fas fa-gem text-4xl text-white"></i>
               </div>
               <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">Refractor</h1>
-              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Small & Slow Mode</p>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Tiny & Ethereal Mode</p>
             </div>
             <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)]">
               Open Prisms
@@ -297,12 +341,12 @@
               </div>
               <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-center gap-2">
                 <div className="shake-hint text-[9px] opacity-30 uppercase font-bold tracking-[0.2em]">
-                  <i className="fas fa-mobile-alt mr-2"></i> Shake for Gentle Tumble
+                  <i className="fas fa-mobile-alt mr-2"></i> Shake or Tap to Spawn Gems
                 </div>
               </div>
             </div>
 
-            {/* Show UI Button - Moved higher up (bottom-24) to avoid mobile navigation bars */}
+            {/* Show UI Button - High enough to clear mobile browser bars */}
             {!uiVisible && (
               <div className="absolute bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto">
                 <button 
