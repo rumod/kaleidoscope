@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Kaleidoscope",
+  "description": "An interactive digital kaleidoscope that reacts to your phone's movement. Live camera background with physics-based tumbling beads.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

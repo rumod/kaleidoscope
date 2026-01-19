@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Gemini Kaleidoscope | Refractor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #000;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    canvas {
+      display: block;
+    }
+    input[type='range']::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      background: white;
+      border-radius: 50%;
+      cursor: pointer;
+      box-shadow: 0 0 10px rgba(255,255,255,0.5);
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "@google/genai": "https://esm.sh/@google/genai@^1.37.0",
+        "react": "https://esm.sh/react@^19.2.3",
+        "react-dom": "https://esm.sh/react-dom@^19.2.3",
+        "react-dom/client": "https://esm.sh/react-dom@^19.2.3/client"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    import React, { useState, useEffect, useRef, useCallback } from 'react';
+    import ReactDOM from 'react-dom/client';
+    import { GoogleGenAI, Type } from "@google/genai";
+
+    /** 
+     * --- GEMINI SERVICE ---
+     */
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+    async function generatePaletteAndBeads() {
+      try {
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: "Generate a vibrant, artistic color palette (5 colors in hex) and a list of 10 abstract bead properties (size 5-20, type: circle, star, or polygon) for a digital kaleidoscope theme.",
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                palette: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: "Array of 5 hex color strings"
+                },
+                beads: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      size: { type: Type.NUMBER },
+                      type: { type: Type.STRING, enum: ["circle", "star", "polygon"] },
+                      color: { type: Type.STRING }
+                    },
+                    required: ["size", "type", "color"]
+                  }
+                }
+              },
+              required: ["palette", "beads"]
+            }
+          }
+        });
+
+        const data = JSON.parse(response.text);
+        return data;
+      } catch (error) {
+        console.error("Gemini failed, falling back to defaults", error);
+        return {
+          palette: ["#FF0080", "#7928CA", "#FF4D4D", "#F9CB28", "#0070F3"],
+          beads: Array.from({ length: 10 }, () => ({
+            size: Math.random() * 15 + 5,
+            type: "circle",
+            color: "#FFF"
+          }))
+        };
+      }
+    }
+
+    /** 
+     * --- KALEIDOSCOPE CANVAS COMPONENT ---
+     */
+    const KaleidoscopeCanvas = ({ settings, videoStream, palette }) => {
+      const canvasRef = useRef(null);
+      const videoRef = useRef(null);
+      const offscreenCanvasRef = useRef(null);
+      const beadsRef = useRef([]);
+      const requestRef = useRef();
+      
+      const compositeModes = [
+        'source-over', 'screen', 'overlay', 'lighten', 'color-dodge', 'hard-light'
+      ];
+
+      useEffect(() => {
+        if (videoStream && !videoRef.current) {
+          const video = document.createElement('video');
+          video.srcObject = videoStream;
+          video.setAttribute('playsinline', '');
+          video.play().catch(console.error);
+          videoRef.current = video;
+        }
+      }, [videoStream]);
+
+      const spawnGems = useCallback(() => {
+        if (beadsRef.current.length > 400) {
+          beadsRef.current.splice(0, 40);
+        }
+        const count = 10 + Math.floor(Math.random() * 10);
+        const maxRadius = Math.max(window.innerWidth, window.innerHeight) * 0.5;
+
+        for (let i = 0; i < count; i++) {
+          const type = ['circle', 'star', 'polygon'][Math.floor(Math.random() * 3)];
+          const launchAngle = Math.random() * Math.PI * 2;
+          const launchSpeed = 0.2 + Math.random() * 1.5; 
+          const spawnRadius = Math.random() * (maxRadius * 0.8);
+          const spawnAngle = Math.random() * Math.PI * 2;
+
+          beadsRef.current.push({
+            id: `gem-${Date.now()}-${Math.random()}`,
+            x: Math.cos(spawnAngle) * spawnRadius,
+            y: Math.sin(spawnAngle) * spawnRadius,
+            vx: Math.cos(launchAngle) * launchSpeed,
+            vy: Math.sin(launchAngle) * launchSpeed,
+            size: Math.random() * 5 + 2.5, 
+            color: palette[Math.floor(Math.random() * palette.length)],
+            type,
+            rotation: Math.random() * Math.PI * 2,
+            vRotation: (Math.random() - 0.5) * 0.15,
+            compositeOperation: compositeModes[Math.floor(Math.random() * compositeModes.length)],
+            frictionFactor: 0.92 + Math.random() * 0.16
+          });
+        }
+      }, [palette]);
+
+      const updateBeads = (boundary) => {
+        beadsRef.current.forEach(bead => {
+          bead.vx *= 0.97 * bead.frictionFactor;
+          bead.vy *= 0.97 * bead.frictionFactor;
+          bead.vy += settings.gravity * 0.2 * bead.frictionFactor;
+          bead.x += bead.vx;
+          bead.y += bead.vy;
+          bead.rotation += bead.vRotation + Math.hypot(bead.vx, bead.vy) * 0.03;
+
+          const dist = Math.hypot(bead.x, bead.y);
+          if (dist > boundary) {
+            const angle = Math.atan2(bead.y, bead.x);
+            bead.x = Math.cos(angle) * boundary;
+            bead.y = Math.sin(angle) * boundary;
+            const nx = Math.cos(angle), ny = Math.sin(angle);
+            const dot = bead.vx * nx + bead.vy * ny;
+            bead.vx = (bead.vx - 2 * dot * nx) * 0.35;
+            bead.vy = (bead.vy - 2 * dot * ny) * 0.35;
+          }
+        });
+      };
+
+      const drawBead = (ctx, bead) => {
+        ctx.save();
+        ctx.globalCompositeOperation = bead.compositeOperation;
+        ctx.translate(bead.x, bead.y);
+        ctx.rotate(bead.rotation);
+        ctx.fillStyle = bead.color;
+        ctx.shadowBlur = 10; 
+        ctx.shadowColor = bead.color;
+        ctx.globalAlpha = 0.9;
+        
+        if (bead.type === 'circle') {
+          ctx.beginPath(); ctx.arc(0, 0, bead.size, 0, Math.PI * 2); ctx.fill();
+        } else if (bead.type === 'star') {
+          const s = 5, outer = bead.size, inner = bead.size * 0.45;
+          ctx.beginPath();
+          for(let i=0; i<s*2; i++){
+            const r = i%2===0 ? outer : inner;
+            const a = i * Math.PI / s;
+            ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
+          }
+          ctx.fill();
+        } else {
+          const sides = bead.size > 10 ? 6 : 3;
+          ctx.beginPath();
+          for(let i=0; i<sides; i++){
+            const a = i * 2 * Math.PI / sides;
+            ctx.lineTo(Math.cos(a)*bead.size, Math.sin(a)*bead.size);
+          }
+          ctx.fill();
+        }
+        ctx.restore();
+      };
+
+      const animate = useCallback(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) return;
+
+        const w = canvas.width, h = canvas.height;
+        const viewRadius = Math.hypot(w, h) * 0.6 * settings.zoom;
+        const sliceAngle = (Math.PI * 2) / settings.segments;
+
+        if (!offscreenCanvasRef.current) offscreenCanvasRef.current = document.createElement('canvas');
+        const off = offscreenCanvasRef.current;
+        const offSize = Math.ceil(viewRadius * 2);
+        if (off.width !== offSize) off.width = off.height = offSize;
+        const octx = off.getContext('2d');
+        if (!octx) return;
+
+        updateBeads(viewRadius);
+        octx.clearRect(0, 0, offSize, offSize);
+        octx.save();
+        octx.translate(offSize/2, offSize/2);
+
+        const bgSource = videoRef.current;
+        if (bgSource && bgSource.readyState >= 2) {
+          const sw = bgSource.videoWidth, sh = bgSource.videoHeight;
+          const scale = Math.max(offSize/sw, offSize/sh);
+          octx.save(); octx.scale(-1, 1);
+          octx.drawImage(bgSource, -sw*scale/2, -sh*scale/2, sw*scale, sh*scale);
+          octx.restore();
+        } else {
+          octx.fillStyle = '#080808'; octx.fillRect(-offSize/2, -offSize/2, offSize, offSize);
+        }
+
+        beadsRef.current.forEach(bead => drawBead(octx, bead));
+        octx.restore();
+
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+        ctx.save(); ctx.translate(w/2, h/2);
+        for (let i = 0; i < settings.segments; i++) {
+          ctx.save(); ctx.rotate(i * sliceAngle);
+          ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, viewRadius, 0, sliceAngle + 0.005); ctx.closePath(); ctx.clip();
+          if (i % 2 === 1) { ctx.scale(1, -1); ctx.rotate(-sliceAngle); }
+          ctx.drawImage(off, -offSize/2, -offSize/2, offSize, offSize);
+          ctx.restore();
+        }
+        ctx.restore();
+        requestRef.current = requestAnimationFrame(animate);
+      }, [settings]);
+
+      useEffect(() => {
+        const resize = () => { 
+          if(canvasRef.current){ 
+            canvasRef.current.width = window.innerWidth; 
+            canvasRef.current.height = window.innerHeight; 
+          } 
+        };
+        window.addEventListener('resize', resize); resize();
+        requestRef.current = requestAnimationFrame(animate);
+        return () => { 
+          window.removeEventListener('resize', resize); 
+          if (requestRef.current) cancelAnimationFrame(requestRef.current); 
+        };
+      }, [animate]);
+
+      return <canvas ref={canvasRef} onMouseDown={spawnGems} onTouchStart={spawnGems} className="touch-none cursor-pointer" />;
+    };
+
+    /** 
+     * --- MAIN APP COMPONENT ---
+     */
+    const App = () => {
+      const [settings, setSettings] = useState({ segments: 12, zoom: 1.0, speed: 0.90, friction: 0.96, gravity: 0.02 });
+      const [videoStream, setVideoStream] = useState(null);
+      const [palette, setPalette] = useState(['#E91E63', '#9C27B0', '#2196F3', '#00BCD4', '#FFEB3B']);
+      const [isLoading, setIsLoading] = useState(false);
+      const [uiVisible, setUiVisible] = useState(true);
+
+      useEffect(() => {
+        async function setupCamera() {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+              video: { facingMode: 'environment' }, audio: false 
+            });
+            setVideoStream(stream);
+          } catch (err) { console.warn("Camera denied:", err); }
+        }
+        setupCamera();
+      }, []);
+
+      const initPalette = useCallback(async () => {
+        setIsLoading(true);
+        const data = await generatePaletteAndBeads();
+        if (data && data.palette) setPalette(data.palette);
+        setIsLoading(false);
+      }, []);
+
+      useEffect(() => { initPalette(); }, [initPalette]);
+
+      return (
+        <div className="relative w-full h-screen bg-black overflow-hidden font-sans text-white select-none">
+          <KaleidoscopeCanvas settings={settings} videoStream={videoStream} palette={palette} />
+          
+          <div className="absolute inset-x-0 bottom-10 p-6 flex flex-col items-center pointer-events-none">
+            <div className={`max-w-md w-full transition-all duration-700 ease-in-out pointer-events-auto flex flex-col items-center ${uiVisible ? 'bg-white/5 backdrop-blur-3xl rounded-[3rem] p-8 border border-white/10 shadow-2xl' : 'bg-transparent border-transparent'}`}>
+              
+              <div className="w-full flex items-center justify-between gap-4">
+                <div className={`flex-1 transition-all duration-500 overflow-hidden ${uiVisible ? 'opacity-100 max-w-full' : 'opacity-0 max-w-0'}`}>
+                  <h1 className="text-2xl font-black tracking-tighter bg-gradient-to-b from-white to-white/40 bg-clip-text text-transparent uppercase whitespace-nowrap">Refractor</h1>
+                  <p className="text-[8px] text-white/30 tracking-[0.4em] font-bold uppercase whitespace-nowrap">Prismatic View</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button onClick={initPalette} disabled={isLoading} className={`w-14 h-14 flex items-center justify-center rounded-full bg-white text-black shadow-2xl transition-all duration-500 ${uiVisible ? 'opacity-100 scale-100' : 'opacity-0 scale-0 pointer-events-none'} ${isLoading ? 'animate-pulse' : 'hover:scale-110 active:scale-95'}`}>
+                    <i className={`fas fa-wand-magic-sparkles text-lg ${isLoading ? 'animate-spin' : ''}`}></i>
+                  </button>
+                  <button onClick={() => setUiVisible(!uiVisible)} className={`w-14 h-14 flex items-center justify-center rounded-full transition-all duration-500 border border-white/10 shadow-2xl backdrop-blur-3xl ${uiVisible ? 'bg-white/10 text-white' : 'bg-white text-black scale-110'}`}>
+                    <i className={`fas ${uiVisible ? 'fa-eye-slash' : 'fa-eye'} text-lg`}></i>
+                  </button>
+                </div>
+              </div>
+
+              <div className={`w-full transition-all duration-500 overflow-hidden ${uiVisible ? 'max-h-64 opacity-100 mt-8' : 'max-h-0 opacity-0 mt-0 pointer-events-none'}`}>
+                <div className="space-y-6">
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-[10px] text-white/40 tracking-widest font-black uppercase"><span>Reflections</span><span className="text-white">{settings.segments}</span></div>
+                    <input type="range" min="4" max="24" step="2" value={settings.segments} onChange={(e) => setSettings({...settings, segments: parseInt(e.target.value)})} className="w-full h-1 bg-white/10 rounded-full appearance-none accent-white cursor-pointer" />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-[10px] text-white/40 tracking-widest font-black uppercase"><span>Magnification</span><span className="text-white">{settings.zoom.toFixed(1)}x</span></div>
+                    <input type="range" min="0.5" max="2.5" step="0.1" value={settings.zoom} onChange={(e) => setSettings({...settings, zoom: parseFloat(e.target.value)})} className="w-full h-1 bg-white/10 rounded-full appearance-none accent-white cursor-pointer" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {isLoading && (
+            <div className="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-black/40 backdrop-blur-md transition-opacity duration-500">
+              <div className="w-12 h-12 border-2 border-white/5 border-t-white rounded-full animate-spin mb-6"></div>
+              <span className="text-[10px] tracking-[0.5em] text-white font-black uppercase animate-pulse">Refracting Light</span>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(React.createElement(App));
+  </script>
+</body>
+</html>
