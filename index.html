@@ -101,8 +101,8 @@
       const rafRef = useRef(null);
 
       const createBead = useCallback((customProps = {}) => {
-        // Diversify sizes significantly: base size between 1.0 and 3.5
-        let size = Math.random() * 2.5 + 1.0; 
+        // Diversify sizes significantly: base size between 4.0 and 10.0 (Larger minimum)
+        let size = Math.random() * 6.0 + 4.0; 
         
         const sizeRand = Math.random();
         // 15% chance for Mega Gems (3x size)
@@ -305,7 +305,7 @@
                 <i className="fas fa-gem text-4xl text-white"></i>
               </div>
               <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">Refractor</h1>
-              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Dynamic Sized Jewels</p>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Chunky Jewels</p>
             </div>
             <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)]">
               Begin Refraction
@@ -323,7 +323,7 @@
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h1 className="text-xl font-black italic tracking-tighter uppercase leading-none">Refractor</h1>
-                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Varied Scale Mode</p>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Bold Gem Mode</p>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => setUiVisible(false)} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90">
