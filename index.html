@@ -76,7 +76,7 @@
 <body>
   <div id="root"></div>
   <script type="text/babel" data-type="module">
-    import React, { useState, useEffect, useRef, useCallback } from 'react';
+    import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef } from 'react';
     import ReactDOM from 'react-dom/client';
     import { GoogleGenAI, Type } from "@google/genai";
 
@@ -93,7 +93,7 @@
       "#FDFD96"  // Pastel Yellow
     ];
 
-    const KaleidoscopeCanvas = ({ settings, videoStream }) => {
+    const KaleidoscopeCanvas = forwardRef(({ settings, videoStream }, ref) => {
       const canvasRef = useRef(null);
       const videoRef = useRef(null);
       const beadsRef = useRef([]);
@@ -101,7 +101,7 @@
       const rafRef = useRef(null);
 
       const createBead = useCallback((customProps = {}) => {
-        let size = Math.random() * 4.0 + 6.0; 
+        let size = Math.random() * 5.0 + 7.0; 
         const color = NEON_PASTEL_PALETTE[Math.floor(Math.random() * NEON_PASTEL_PALETTE.length)];
 
         return {
@@ -120,6 +120,65 @@
         };
       }, []);
 
+      useImperativeHandle(ref, () => ({
+        handleAction: (e) => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+
+          const rect = canvas.getBoundingClientRect();
+          const centerX = rect.width / 2;
+          const centerY = rect.height / 2;
+          const radius = Math.hypot(rect.width, rect.height) * 0.5 * settings.zoom;
+          const sliceAngle = (Math.PI * 2) / settings.segments;
+
+          let spawnX, spawnY;
+
+          if (e && e.clientX !== undefined) {
+            const rawX = e.clientX - rect.left - centerX;
+            const rawY = e.clientY - rect.top - centerY;
+            const dist = Math.hypot(rawX, rawY);
+
+            // 중요: 반사되는 원형 영역(Radius) 밖을 터치하면 생성하지 않음 (가려진 곳 생성 방지)
+            if (dist > radius) return;
+
+            // 터치 지점을 기준 조각(Source)의 좌표로 변환
+            let angle = Math.atan2(rawY, rawX);
+            if (angle < 0) angle += Math.PI * 2;
+
+            const segmentIndex = Math.floor(angle / sliceAngle);
+            let localAngle = angle % sliceAngle;
+
+            // 반사 렌더링에 맞춰 홀수 인덱스 보정
+            if (segmentIndex % 2 === 1) {
+              localAngle = sliceAngle - localAngle;
+            }
+
+            spawnX = Math.cos(localAngle) * dist;
+            spawnY = Math.sin(localAngle) * dist;
+          } else {
+            // 흔들기 시에는 중앙 근처에서 랜덤 생성
+            const rndDist = Math.random() * (radius * 0.6);
+            const rndAngle = Math.random() * sliceAngle;
+            spawnX = Math.cos(rndAngle) * rndDist;
+            spawnY = Math.sin(rndAngle) * rndDist;
+          }
+
+          const count = Math.floor(Math.random() * 8) + 6;
+          const newBeads = [];
+          for (let i = 0; i < count; i++) {
+            newBeads.push(createBead({
+              x: spawnX,
+              y: spawnY,
+              vx: (Math.random() - 0.5) * 10,
+              vy: (Math.random() - 0.5) * 10,
+              vRot: (Math.random() - 0.5) * 1.0 
+            }));
+          }
+          
+          beadsRef.current = [...beadsRef.current, ...newBeads];
+        }
+      }));
+
       useEffect(() => {
         if (videoStream && !videoRef.current) {
           const video = document.createElement('video');
@@ -129,69 +188,6 @@
           videoRef.current = video;
         }
       }, [videoStream]);
-
-      const handleAction = useCallback((e) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const rect = canvas.getBoundingClientRect();
-        const centerX = rect.width / 2;
-        const centerY = rect.height / 2;
-        const radius = Math.hypot(rect.width, rect.height) * 0.5 * settings.zoom;
-        const sliceAngle = (Math.PI * 2) / settings.segments;
-
-        let spawnX, spawnY;
-
-        if (e && e.clientX !== undefined) {
-          // 1. 터치한 위치의 상대 좌표 계산
-          const rawX = e.clientX - rect.left - centerX;
-          const rawY = e.clientY - rect.top - centerY;
-          
-          // 2. 극좌표로 변환 (거리와 각도)
-          const dist = Math.min(Math.hypot(rawX, rawY), radius - 10);
-          let angle = Math.atan2(rawY, rawX);
-          if (angle < 0) angle += Math.PI * 2;
-
-          // 3. 만화경의 '기준 조각(Ref slice)' 범위 내로 각도 매핑
-          // 현재 조각의 인덱스를 찾음
-          const segmentIndex = Math.floor(angle / sliceAngle);
-          let localAngle = angle % sliceAngle;
-
-          // 4. 만화경 렌더링 로직상 홀수 조각은 좌우 반전되므로 이를 보정
-          if (segmentIndex % 2 === 1) {
-            localAngle = sliceAngle - localAngle;
-          }
-
-          // 5. 기준 조각 내부의 좌표로 최종 결정 (이 구역에 그려야 모든 대칭 조각에 나타남)
-          spawnX = Math.cos(localAngle) * dist;
-          spawnY = Math.sin(localAngle) * dist;
-        } else {
-          // 흔들기 시에는 기준 조각 내부의 랜덤 위치에서 생성
-          const rndDist = Math.random() * (radius * 0.8);
-          const rndAngle = Math.random() * sliceAngle;
-          spawnX = Math.cos(rndAngle) * rndDist;
-          spawnY = Math.sin(rndAngle) * rndDist;
-        }
-
-        const count = Math.floor(Math.random() * 6) + 5;
-        const newBeads = [];
-        for (let i = 0; i < count; i++) {
-          newBeads.push(createBead({
-            x: spawnX,
-            y: spawnY,
-            vx: (Math.random() - 0.5) * 8, // 속도감 향상
-            vy: (Math.random() - 0.5) * 8,
-            vRot: (Math.random() - 0.5) * 0.8 
-          }));
-        }
-        
-        beadsRef.current.forEach(b => { 
-          b.vx += (Math.random() - 0.5) * 3; 
-          b.vy += (Math.random() - 0.5) * 3; 
-        });
-
-        beadsRef.current = [...beadsRef.current, ...newBeads];
-      }, [createBead, settings]);
 
       const animate = useCallback(() => {
         const canvas = canvasRef.current;
@@ -214,51 +210,28 @@
         beadsRef.current = beadsRef.current.filter(b => {
           const age = (now - b.createdAt) / 1000;
           if (age >= 1.8) return false;
-          
-          if (age > 1.4) {
-            b.alpha = 1 - (age - 1.4) / 0.4;
-          } else {
-            b.alpha = 1;
-          }
+          b.alpha = age > 1.4 ? 1 - (age - 1.4) / 0.4 : 1;
 
           b.vx *= 0.98; b.vy *= 0.98;
-          b.vy += 0.02; // 중력 효과 약간 강화
+          b.vy += 0.03; 
           b.x += b.vx; b.y += b.vy;
-          
-          b.rot += b.vRot;
-          b.vRot *= 0.99; 
+          b.rot += b.vRot; b.vRot *= 0.99; 
 
-          // 벽 충돌 (기준 조각 내부 유지)
           const dist = Math.hypot(b.x, b.y);
           const angle = Math.atan2(b.y, b.x);
 
-          // 1. 원형 경계 충돌
           if (dist > radius) {
-            const normalA = Math.atan2(b.y, b.x);
-            b.x = Math.cos(normalA) * radius;
-            b.y = Math.sin(normalA) * radius;
+            const na = Math.atan2(b.y, b.x);
+            b.x = Math.cos(na) * radius; b.y = Math.sin(na) * radius;
+            b.vx *= -0.7; b.vy *= -0.7;
+          }
+
+          if (angle < 0 || angle > slice) {
+            const ba = angle < 0 ? 0 : slice;
+            const d = Math.hypot(b.x, b.y);
+            b.x = Math.cos(ba) * d; b.y = Math.sin(ba) * d;
             b.vx *= -0.6; b.vy *= -0.6;
           }
-
-          // 2. 부채꼴(Slice) 경계 충돌
-          // 만화경의 원본 소스는 0 ~ slice 각도 사이에 있어야 함
-          let needsReflect = false;
-          let boundaryAngle = 0;
-          if (angle < 0) {
-            needsReflect = true;
-            boundaryAngle = 0;
-          } else if (angle > slice) {
-            needsReflect = true;
-            boundaryAngle = slice;
-          }
-
-          if (needsReflect) {
-            const d = Math.hypot(b.x, b.y);
-            b.x = Math.cos(boundaryAngle) * d;
-            b.y = Math.sin(boundaryAngle) * d;
-            b.vx *= -0.5; b.vy *= -0.5;
-          }
-
           return true;
         });
 
@@ -325,14 +298,15 @@
         return () => cancelAnimationFrame(rafRef.current);
       }, [animate]);
 
-      return <canvas ref={canvasRef} onPointerDown={handleAction} />;
-    };
+      return <canvas ref={canvasRef} />;
+    });
 
     const App = () => {
       const [started, setStarted] = useState(false);
       const [settings, setSettings] = useState({ segments: 12, zoom: 1.2 });
       const [videoStream, setVideoStream] = useState(null);
       const [uiVisible, setUiVisible] = useState(true);
+      const kaleidoscopeRef = useRef(null);
 
       const init = async () => {
         if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
@@ -344,13 +318,14 @@
         window.addEventListener('devicemotion', (e) => {
           const acc = e.accelerationIncludingGravity;
           if (acc && (Math.abs(acc.x) > 13 || Math.abs(acc.y) > 13)) {
-            const canvas = document.querySelector('canvas');
-            if(canvas) {
-              canvas.dispatchEvent(new CustomEvent('pointerdown', { detail: { isShake: true } }));
-            }
+            if (kaleidoscopeRef.current) kaleidoscopeRef.current.handleAction();
           }
         });
         setStarted(true);
+      };
+
+      const handleScreenTouch = (e) => {
+        if (kaleidoscopeRef.current) kaleidoscopeRef.current.handleAction(e);
       };
 
       if (!started) {
@@ -361,9 +336,9 @@
                 <i className="fas fa-gem text-4xl text-white"></i>
               </div>
               <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">Refractor</h1>
-              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Perfect Symmetry</p>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Total Interaction</p>
             </div>
-            <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)]">
+            <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all">
               Begin Refraction
             </button>
           </div>
@@ -371,35 +346,36 @@
       }
 
       return (
-        <div className="relative w-full h-screen overflow-hidden bg-black">
-          <KaleidoscopeCanvas settings={settings} videoStream={videoStream} />
+        <div 
+          className="relative w-full h-screen overflow-hidden bg-black" 
+          onPointerDown={handleScreenTouch}
+        >
+          <KaleidoscopeCanvas ref={kaleidoscopeRef} settings={settings} videoStream={videoStream} />
           
           <div className="absolute inset-x-0 bottom-10 px-6 pointer-events-none z-50">
             <div className={`glass-panel max-w-md mx-auto rounded-[2.5rem] p-6 transition-all duration-700 pointer-events-auto ${uiVisible ? 'translate-y-0 opacity-100' : 'translate-y-32 opacity-0 scale-95 invisible'}`}>
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h1 className="text-xl font-black italic tracking-tighter uppercase leading-none">Refractor</h1>
-                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Touch Anywhere</p>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Dynamic Spawning</p>
                 </div>
-                <div className="flex gap-2">
-                  <button onClick={() => setUiVisible(false)} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90">
-                    <i className="fas fa-eye-slash"></i>
-                  </button>
-                </div>
+                <button onClick={(e) => { e.stopPropagation(); setUiVisible(false); }} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90">
+                  <i className="fas fa-eye-slash"></i>
+                </button>
               </div>
               <div className="space-y-6">
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>Symmetry / {settings.segments}</span></div>
-                  <input type="range" min="4" max="24" step="2" value={settings.segments} onChange={e => setSettings(s=>({...s, segments: parseInt(e.target.value)}))} className="w-full" />
+                  <input type="range" min="4" max="24" step="2" value={settings.segments} onClick={e => e.stopPropagation()} onChange={e => setSettings(s=>({...s, segments: parseInt(e.target.value)}))} className="w-full" />
                 </div>
                 <div className="space-y-2">
                   <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>Zoom / {settings.zoom.toFixed(1)}x</span></div>
-                  <input type="range" min="0.5" max="2.0" step="0.1" value={settings.zoom} onChange={e => setSettings(s=>({...s, zoom: parseFloat(e.target.value)}))} className="w-full" />
+                  <input type="range" min="0.5" max="2.0" step="0.1" value={settings.zoom} onClick={e => e.stopPropagation()} onChange={e => setSettings(s=>({...s, zoom: parseFloat(e.target.value)}))} className="w-full" />
                 </div>
               </div>
               <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-center gap-2">
                 <div className="shake-hint text-[9px] opacity-30 uppercase font-bold tracking-[0.2em]">
-                  <i className="fas fa-hand-pointer mr-2"></i> Guaranteed Spawning Active
+                  <i className="fas fa-expand-arrows-alt mr-2"></i> Touch the circle to spawn
                 </div>
               </div>
             </div>
@@ -407,7 +383,7 @@
             {!uiVisible && (
               <div className="absolute bottom-24 left-1/2 -translate-x-1/2 pointer-events-auto">
                 <button 
-                  onClick={() => setUiVisible(true)} 
+                  onClick={(e) => { e.stopPropagation(); setUiVisible(true); }} 
                   className="w-14 h-14 rounded-full bg-white text-black flex items-center justify-center shadow-2xl active:scale-90 animate-bounce border-4 border-white/20"
                 >
                   <i className="fas fa-eye"></i>
