@@ -138,45 +138,60 @@
         const centerX = rect.width / 2;
         const centerY = rect.height / 2;
         const radius = Math.hypot(rect.width, rect.height) * 0.5 * settings.zoom;
+        const sliceAngle = (Math.PI * 2) / settings.segments;
 
-        let spawnX = 0;
-        let spawnY = 0;
+        let spawnX, spawnY;
 
         if (e && e.clientX !== undefined) {
-          spawnX = e.clientX - rect.left - centerX;
-          spawnY = e.clientY - rect.top - centerY;
+          // 1. 터치한 위치의 상대 좌표 계산
+          const rawX = e.clientX - rect.left - centerX;
+          const rawY = e.clientY - rect.top - centerY;
+          
+          // 2. 극좌표로 변환 (거리와 각도)
+          const dist = Math.min(Math.hypot(rawX, rawY), radius - 10);
+          let angle = Math.atan2(rawY, rawX);
+          if (angle < 0) angle += Math.PI * 2;
+
+          // 3. 만화경의 '기준 조각(Ref slice)' 범위 내로 각도 매핑
+          // 현재 조각의 인덱스를 찾음
+          const segmentIndex = Math.floor(angle / sliceAngle);
+          let localAngle = angle % sliceAngle;
+
+          // 4. 만화경 렌더링 로직상 홀수 조각은 좌우 반전되므로 이를 보정
+          if (segmentIndex % 2 === 1) {
+            localAngle = sliceAngle - localAngle;
+          }
+
+          // 5. 기준 조각 내부의 좌표로 최종 결정 (이 구역에 그려야 모든 대칭 조각에 나타남)
+          spawnX = Math.cos(localAngle) * dist;
+          spawnY = Math.sin(localAngle) * dist;
         } else {
-          spawnX = (Math.random() - 0.5) * 100;
-          spawnY = (Math.random() - 0.5) * 100;
+          // 흔들기 시에는 기준 조각 내부의 랜덤 위치에서 생성
+          const rndDist = Math.random() * (radius * 0.8);
+          const rndAngle = Math.random() * sliceAngle;
+          spawnX = Math.cos(rndAngle) * rndDist;
+          spawnY = Math.sin(rndAngle) * rndDist;
         }
 
-        const dist = Math.hypot(spawnX, spawnY);
-        if (dist > radius - 20) {
-          const angle = Math.atan2(spawnY, spawnX);
-          spawnX = Math.cos(angle) * (radius - 20);
-          spawnY = Math.sin(angle) * (radius - 20);
-        }
-
-        const count = Math.floor(Math.random() * 5) + 4;
+        const count = Math.floor(Math.random() * 6) + 5;
         const newBeads = [];
         for (let i = 0; i < count; i++) {
           newBeads.push(createBead({
             x: spawnX,
             y: spawnY,
-            vx: (Math.random() - 0.5) * 6,
-            vy: (Math.random() - 0.5) * 6,
-            vRot: (Math.random() - 0.5) * 0.6 
+            vx: (Math.random() - 0.5) * 8, // 속도감 향상
+            vy: (Math.random() - 0.5) * 8,
+            vRot: (Math.random() - 0.5) * 0.8 
           }));
         }
         
         beadsRef.current.forEach(b => { 
-          b.vx += (Math.random() - 0.5) * 2; 
-          b.vy += (Math.random() - 0.5) * 2; 
-          b.vRot += (Math.random() - 0.5) * 0.1;
+          b.vx += (Math.random() - 0.5) * 3; 
+          b.vy += (Math.random() - 0.5) * 3; 
         });
 
         beadsRef.current = [...beadsRef.current, ...newBeads];
-      }, [createBead, settings.zoom]);
+      }, [createBead, settings]);
 
       const animate = useCallback(() => {
         const canvas = canvasRef.current;
@@ -198,29 +213,52 @@
 
         beadsRef.current = beadsRef.current.filter(b => {
           const age = (now - b.createdAt) / 1000;
-          if (age >= 1.6) return false;
+          if (age >= 1.8) return false;
           
-          if (age > 1.3) {
-            b.alpha = 1 - (age - 1.3) / 0.3;
+          if (age > 1.4) {
+            b.alpha = 1 - (age - 1.4) / 0.4;
           } else {
             b.alpha = 1;
           }
 
-          b.vx *= 0.985; b.vy *= 0.985;
-          b.vy += 0.015; 
+          b.vx *= 0.98; b.vy *= 0.98;
+          b.vy += 0.02; // 중력 효과 약간 강화
           b.x += b.vx; b.y += b.vy;
           
           b.rot += b.vRot;
-          b.vRot *= 0.992; 
+          b.vRot *= 0.99; 
 
-          const d = Math.hypot(b.x, b.y);
-          if (d > radius) {
-            const angle = Math.atan2(b.y, b.x);
-            b.x = Math.cos(angle) * radius;
-            b.y = Math.sin(angle) * radius;
-            b.vx *= -0.55; b.vy *= -0.55;
-            b.vRot += (Math.random() - 0.5) * 0.3; 
+          // 벽 충돌 (기준 조각 내부 유지)
+          const dist = Math.hypot(b.x, b.y);
+          const angle = Math.atan2(b.y, b.x);
+
+          // 1. 원형 경계 충돌
+          if (dist > radius) {
+            const normalA = Math.atan2(b.y, b.x);
+            b.x = Math.cos(normalA) * radius;
+            b.y = Math.sin(normalA) * radius;
+            b.vx *= -0.6; b.vy *= -0.6;
           }
+
+          // 2. 부채꼴(Slice) 경계 충돌
+          // 만화경의 원본 소스는 0 ~ slice 각도 사이에 있어야 함
+          let needsReflect = false;
+          let boundaryAngle = 0;
+          if (angle < 0) {
+            needsReflect = true;
+            boundaryAngle = 0;
+          } else if (angle > slice) {
+            needsReflect = true;
+            boundaryAngle = slice;
+          }
+
+          if (needsReflect) {
+            const d = Math.hypot(b.x, b.y);
+            b.x = Math.cos(boundaryAngle) * d;
+            b.y = Math.sin(boundaryAngle) * d;
+            b.vx *= -0.5; b.vy *= -0.5;
+          }
+
           return true;
         });
 
@@ -241,7 +279,6 @@
           octx.translate(b.x, b.y); 
           octx.rotate(b.rot); 
           octx.globalAlpha = b.alpha;
-          // Set to 'overlay' as requested
           octx.globalCompositeOperation = 'overlay';
           octx.fillStyle = b.color;
           octx.shadowBlur = 15; octx.shadowColor = b.color;
@@ -324,7 +361,7 @@
                 <i className="fas fa-gem text-4xl text-white"></i>
               </div>
               <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">Refractor</h1>
-              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Overlay Layer Mode</p>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Perfect Symmetry</p>
             </div>
             <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)]">
               Begin Refraction
@@ -342,7 +379,7 @@
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h1 className="text-xl font-black italic tracking-tighter uppercase leading-none">Refractor</h1>
-                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Overlay Blending</p>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Touch Anywhere</p>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => setUiVisible(false)} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90">
@@ -362,7 +399,7 @@
               </div>
               <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-center gap-2">
                 <div className="shake-hint text-[9px] opacity-30 uppercase font-bold tracking-[0.2em]">
-                  <i className="fas fa-magic mr-2"></i> Blending: Overlay
+                  <i className="fas fa-hand-pointer mr-2"></i> Guaranteed Spawning Active
                 </div>
               </div>
             </div>
