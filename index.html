@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>디지털 만화경</title>
+  <title>만화경</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
@@ -81,16 +81,16 @@
     import { GoogleGenAI, Type } from "@google/genai";
 
     const NEON_PASTEL_PALETTE = [
-      "#FF007F", // Neon Pink
-      "#00FFFF", // Neon Cyan
-      "#39FF14", // Neon Green
-      "#BF00FF", // Neon Purple
-      "#FFFF33", // Neon Yellow
-      "#FFB7CE", // Pastel Pink
-      "#AEC6CF", // Pastel Blue
-      "#B39EB5", // Pastel Purple
-      "#77DD77", // Pastel Green
-      "#FDFD96"  // Pastel Yellow
+      "#FF007F", // 네온 핑크
+      "#00FFFF", // 네온 사이언
+      "#39FF14", // 네온 그린
+      "#BF00FF", // 네온 퍼플
+      "#FFFF33", // 네온 옐로우
+      "#FFB7CE", // 파스텔 핑크
+      "#AEC6CF", // 파스텔 블루
+      "#B39EB5", // 파스텔 퍼플
+      "#77DD77", // 파스텔 그린
+      "#FDFD96"  // 파스텔 옐로우
     ];
 
     const KaleidoscopeCanvas = forwardRef(({ settings, videoStream }, ref) => {
@@ -138,6 +138,7 @@
             const rawY = e.clientY - rect.top - centerY;
             const dist = Math.hypot(rawX, rawY);
 
+            // 카메라가 반사되는 유효 영역 안쪽일 때만 생성
             if (dist > radius) return;
 
             let angle = Math.atan2(rawY, rawX);
@@ -153,6 +154,7 @@
             spawnX = Math.cos(localAngle) * dist;
             spawnY = Math.sin(localAngle) * dist;
           } else {
+            // 핸드폰 흔들기 시 랜덤 생성
             const rndDist = Math.random() * (radius * 0.6);
             const rndAngle = Math.random() * sliceAngle;
             spawnX = Math.cos(rndAngle) * rndDist;
@@ -309,7 +311,7 @@
           try { await DeviceMotionEvent.requestPermission(); } catch (e) { console.error(e); }
         }
         navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-          .then(setVideoStream).catch(() => console.warn("Camera denied"));
+          .then(setVideoStream).catch(() => console.warn("카메라 권한 거부됨"));
         
         window.addEventListener('devicemotion', (e) => {
           const acc = e.accelerationIncludingGravity;
@@ -332,7 +334,7 @@
                 <i className="fas fa-gem text-4xl text-white"></i>
               </div>
               <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">만화경</h1>
-              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">터치하여 무늬 만들기</p>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">화면을 터치하거나 흔들어보세요</p>
             </div>
             <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all">
               시작하기
@@ -353,7 +355,7 @@
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h1 className="text-xl font-black italic tracking-tighter uppercase leading-none">만화경</h1>
-                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">실시간 패턴 생성</p>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">실시간 패턴 생성 중</p>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); setUiVisible(false); }} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90">
                   <i className="fas fa-eye-slash"></i>
@@ -361,17 +363,17 @@
               </div>
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>대칭수 / {settings.segments}</span></div>
+                  <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>대칭 조각 수 / {settings.segments}</span></div>
                   <input type="range" min="4" max="24" step="2" value={settings.segments} onClick={e => e.stopPropagation()} onChange={e => setSettings(s=>({...s, segments: parseInt(e.target.value)}))} className="w-full" />
                 </div>
                 <div className="space-y-2">
-                  <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>확대 / {settings.zoom.toFixed(1)}x</span></div>
+                  <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>확대 배율 / {settings.zoom.toFixed(1)}x</span></div>
                   <input type="range" min="0.5" max="2.0" step="0.1" value={settings.zoom} onClick={e => e.stopPropagation()} onChange={e => setSettings(s=>({...s, zoom: parseFloat(e.target.value)}))} className="w-full" />
                 </div>
               </div>
               <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-center gap-2">
                 <div className="shake-hint text-[9px] opacity-30 uppercase font-bold tracking-[0.2em]">
-                  <i className="fas fa-expand-arrows-alt mr-2"></i> 원 안을 터치하여 보석을 만드세요
+                  <i className="fas fa-magic mr-2"></i> 원 안쪽을 터치하면 보석이 나타납니다
                 </div>
               </div>
             </div>
