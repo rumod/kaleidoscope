@@ -101,8 +101,8 @@
       const rafRef = useRef(null);
 
       const createBead = useCallback((customProps = {}) => {
-        // Gem base size between 12.0 and 20.0
-        let size = Math.random() * 8.0 + 12.0; 
+        // Reduced size: base size between 6.0 and 10.0 (Half of previous 12-20)
+        let size = Math.random() * 4.0 + 6.0; 
 
         const color = NEON_PASTEL_PALETTE[Math.floor(Math.random() * NEON_PASTEL_PALETTE.length)];
 
@@ -114,7 +114,6 @@
           size: size,
           color: color,
           rot: Math.random() * Math.PI * 2,
-          // Increased rotation speed for "빙글빙글" effect
           vRot: (Math.random() - 0.5) * 0.25, 
           type: ['circle', 'rect', 'star', 'poly'][Math.floor(Math.random() * 4)],
           createdAt: performance.now(),
@@ -140,7 +139,7 @@
           newBeads.push(createBead({
             vx: (Math.random() - 0.5) * 4,
             vy: (Math.random() - 0.5) * 4,
-            vRot: (Math.random() - 0.5) * 0.4 // Burst of rotation when triggered
+            vRot: (Math.random() - 0.5) * 0.4 
           }));
         }
         
@@ -183,12 +182,11 @@
           }
 
           b.vx *= 0.99; b.vy *= 0.99;
-          b.vy += 0.012; // Gravity
+          b.vy += 0.012; 
           b.x += b.vx; b.y += b.vy;
           
-          // Apply rotation
           b.rot += b.vRot;
-          b.vRot *= 0.995; // Slow down rotation slightly over time
+          b.vRot *= 0.995; 
 
           const d = Math.hypot(b.x, b.y);
           if (d > radius) {
@@ -196,7 +194,7 @@
             b.x = Math.cos(angle) * radius;
             b.y = Math.sin(angle) * radius;
             b.vx *= -0.5; b.vy *= -0.5;
-            b.vRot += (Math.random() - 0.5) * 0.2; // Spin more on impact
+            b.vRot += (Math.random() - 0.5) * 0.2; 
           }
           return true;
         });
@@ -205,7 +203,6 @@
         octx.save();
         octx.translate(radius, radius);
         
-        // Background Feed
         if (videoRef.current && videoRef.current.readyState >= 2) {
           const vw = videoRef.current.videoWidth, vh = videoRef.current.videoHeight;
           const scale = Math.max(offSize/vw, offSize/vh);
@@ -214,18 +211,17 @@
           octx.restore();
         }
 
-        // Draw Gems with Screen Mode
         beadsRef.current.forEach(b => {
           octx.save();
           octx.translate(b.x, b.y); 
-          octx.rotate(b.rot); // Spinning each gem!
+          octx.rotate(b.rot); 
           octx.globalAlpha = b.alpha;
-          octx.globalCompositeOperation = 'screen';
+          // Updated to source-over for 'normal' layer mode
+          octx.globalCompositeOperation = 'source-over';
           octx.fillStyle = b.color;
           octx.shadowBlur = 15; octx.shadowColor = b.color;
           
           if (b.type === 'circle') { 
-            // Circles need something internal to show rotation, let's use a semi-circle or line
             octx.beginPath(); octx.arc(0,0,b.size,0,Math.PI*1.5); octx.fill(); 
           } else if (b.type === 'star') {
             octx.beginPath(); 
@@ -249,7 +245,6 @@
         });
         octx.restore();
 
-        // Render Slices
         ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
         ctx.save(); ctx.translate(w/2, h/2);
         for(let i=0; i<settings.segments; i++) {
@@ -302,7 +297,7 @@
                 <i className="fas fa-gem text-4xl text-white"></i>
               </div>
               <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">Refractor</h1>
-              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Spinning Gem Mode</p>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Classic Layer Mode</p>
             </div>
             <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)]">
               Begin Refraction
@@ -320,7 +315,7 @@
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h1 className="text-xl font-black italic tracking-tighter uppercase leading-none">Refractor</h1>
-                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Spinning & Glowing</p>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Normal Blending</p>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => setUiVisible(false)} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90">
@@ -340,7 +335,7 @@
               </div>
               <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-center gap-2">
                 <div className="shake-hint text-[9px] opacity-30 uppercase font-bold tracking-[0.2em]">
-                  <i className="fas fa-mobile-alt mr-2"></i> Shake or Tap for Spindown
+                  <i className="fas fa-mobile-alt mr-2"></i> Shake or Tap to Tumble
                 </div>
               </div>
             </div>
