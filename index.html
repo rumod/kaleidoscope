@@ -16,6 +16,7 @@
       touch-action: none;
       -webkit-tap-highlight-color: transparent;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color: white;
     }
     canvas {
       display: block;
@@ -50,12 +51,15 @@
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     }
     .shake-hint {
-      animation: shake 2s ease-in-out infinite;
+      animation: shake 2.5s ease-in-out infinite;
     }
     @keyframes shake {
-      0%, 100% { transform: rotate(0deg); }
-      25% { transform: rotate(5deg); }
-      75% { transform: rotate(-5deg); }
+      0%, 100% { transform: translate(0,0) rotate(0deg); }
+      10%, 30%, 50%, 70%, 90% { transform: translate(-2px,0) rotate(-1deg); }
+      20%, 40%, 60%, 80% { transform: translate(2px,0) rotate(1deg); }
+    }
+    .start-overlay {
+      background: radial-gradient(circle at center, #1a1a1a 0%, #000 100%);
     }
   </style>
   <script type="importmap">
@@ -76,19 +80,27 @@
     import ReactDOM from 'react-dom/client';
     import { GoogleGenAI, Type } from "@google/genai";
 
-    const API_KEY = process.env.API_KEY;
+    // Safe access to API_KEY to prevent ReferenceError
+    const getApiKey = () => {
+      try {
+        return process.env.API_KEY || null;
+      } catch (e) {
+        return null;
+      }
+    };
 
     /** 
      * --- GEMINI SERVICE ---
      */
     async function getAIGeneratedTheme() {
-      if (!API_KEY) return { palette: ["#FF0080", "#7928CA", "#FF4D4D", "#F9CB28", "#0070F3"] };
+      const key = getApiKey();
+      if (!key) return { palette: ["#FF0080", "#7928CA", "#FF4D4D", "#F9CB28", "#0070F3"] };
       
-      const ai = new GoogleGenAI({ apiKey: API_KEY });
+      const ai = new GoogleGenAI({ apiKey: key });
       try {
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
-          contents: "Create a vibrant, high-contrast color palette of 5 hex codes for an artistic digital kaleidoscope. Return only JSON.",
+          contents: "Create a vibrant, high-contrast color palette of 5 hex codes for an artistic digital kaleidoscope. Neon and glass-like colors. Return JSON only.",
           config: {
             responseMimeType: "application/json",
             responseSchema: {
@@ -102,22 +114,20 @@
         });
         return JSON.parse(response.text);
       } catch (e) {
-        console.error("Gemini failed, using fallback.", e);
         return { palette: ["#E91E63", "#9C27B0", "#2196F3", "#00BCD4", "#FFEB3B"] };
       }
     }
 
     /** 
-     * --- KALEIDOSCOPE CORE COMPONENT ---
+     * --- KALEIDOSCOPE CORE ---
      */
     const KaleidoscopeCanvas = ({ settings, videoStream, palette }) => {
       const canvasRef = useRef(null);
       const videoRef = useRef(null);
       const beadsRef = useRef([]);
-      const offscreenCanvasRef = useRef(null);
-      const animationFrameRef = useRef(null);
+      const offscreenRef = useRef(null);
+      const rafRef = useRef(null);
 
-      // Initialize Video
       useEffect(() => {
         if (videoStream && !videoRef.current) {
           const video = document.createElement('video');
@@ -128,211 +138,174 @@
         }
       }, [videoStream]);
 
-      // Initialize Beads
       useEffect(() => {
-        const initialBeads = [];
-        for (let i = 0; i < 40; i++) {
-          initialBeads.push(createBead(palette));
-        }
-        beadsRef.current = initialBeads;
+        const createBead = () => ({
+          x: (Math.random() - 0.5) * 300,
+          y: (Math.random() - 0.5) * 300,
+          vx: (Math.random() - 0.5) * 6,
+          vy: (Math.random() - 0.5) * 6,
+          size: Math.random() * 20 + 5,
+          color: palette[Math.floor(Math.random() * palette.length)],
+          rot: Math.random() * Math.PI * 2,
+          vRot: (Math.random() - 0.5) * 0.1,
+          type: ['circle', 'rect', 'star'][Math.floor(Math.random() * 3)]
+        });
+        beadsRef.current = Array.from({ length: 45 }, createBead);
       }, [palette]);
-
-      const createBead = (p) => ({
-        x: (Math.random() - 0.5) * 200,
-        y: (Math.random() - 0.5) * 200,
-        vx: (Math.random() - 0.5) * 4,
-        vy: (Math.random() - 0.5) * 4,
-        size: Math.random() * 15 + 5,
-        color: p[Math.floor(Math.random() * p.length)],
-        rotation: Math.random() * Math.PI * 2,
-        vRotation: (Math.random() - 0.5) * 0.1,
-        type: ['circle', 'poly', 'star'][Math.floor(Math.random() * 3)]
-      });
-
-      // Shake Event
-      useEffect(() => {
-        const handleMotion = (e) => {
-          const acc = e.accelerationIncludingGravity;
-          if (!acc) return;
-          const totalAcc = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-          if (totalAcc > 20) {
-            beadsRef.current.forEach(b => {
-              b.vx += (Math.random() - 0.5) * 30;
-              b.vy += (Math.random() - 0.5) * 30;
-            });
-          }
-        };
-        window.addEventListener('devicemotion', handleMotion);
-        return () => window.removeEventListener('devicemotion', handleMotion);
-      }, []);
 
       const animate = useCallback(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        const w = window.innerWidth;
-        const h = window.innerHeight;
-        
-        if (canvas.width !== w) {
-          canvas.width = w;
-          canvas.height = h;
-        }
+        const w = window.innerWidth, h = window.innerHeight;
+        if (canvas.width !== w) { canvas.width = w; canvas.height = h; }
 
         const radius = Math.hypot(w, h) * 0.5 * settings.zoom;
-        const sliceAngle = (Math.PI * 2) / settings.segments;
+        const slice = (Math.PI * 2) / settings.segments;
 
-        // Draw Source Slice to Offscreen
-        if (!offscreenCanvasRef.current) offscreenCanvasRef.current = document.createElement('canvas');
-        const off = offscreenCanvasRef.current;
+        if (!offscreenRef.current) offscreenRef.current = document.createElement('canvas');
+        const off = offscreenRef.current;
         const offSize = Math.ceil(radius * 2);
-        if (off.width !== offSize) off.width = off.height = offSize;
+        if (off.width !== offSize) { off.width = off.height = offSize; }
         const octx = off.getContext('2d');
 
-        // Physics Update
+        // Physics
         beadsRef.current.forEach(b => {
-          b.vx *= 0.99; b.vy *= 0.99;
-          b.vy += 0.1; // Gravity
+          b.vx *= 0.98; b.vy *= 0.98;
+          b.vy += 0.12; // gravity
           b.x += b.vx; b.y += b.vy;
-          b.rotation += b.vRotation;
-
-          const dist = Math.hypot(b.x, b.y);
-          if (dist > radius) {
+          b.rot += b.vRot;
+          const d = Math.hypot(b.x, b.y);
+          if (d > radius) {
             const angle = Math.atan2(b.y, b.x);
             b.x = Math.cos(angle) * radius;
             b.y = Math.sin(angle) * radius;
-            b.vx *= -0.7; b.vy *= -0.7;
+            b.vx *= -0.8; b.vy *= -0.8;
           }
         });
 
+        // Draw Source
         octx.clearRect(0, 0, offSize, offSize);
         octx.save();
         octx.translate(radius, radius);
-        
-        // Background Camera
         if (videoRef.current && videoRef.current.readyState >= 2) {
-          const vw = videoRef.current.videoWidth;
-          const vh = videoRef.current.videoHeight;
+          const vw = videoRef.current.videoWidth, vh = videoRef.current.videoHeight;
           const scale = Math.max(offSize/vw, offSize/vh);
-          octx.save();
-          octx.scale(-1, 1);
+          octx.save(); octx.scale(-1, 1);
           octx.drawImage(videoRef.current, -vw*scale/2, -vh*scale/2, vw*scale, vh*scale);
           octx.restore();
-        } else {
-          octx.fillStyle = '#0a0a0a';
-          octx.fillRect(-radius, -radius, offSize, offSize);
         }
-
-        // Draw Beads
         beadsRef.current.forEach(b => {
           octx.save();
-          octx.translate(b.x, b.y);
-          octx.rotate(b.rotation);
+          octx.translate(b.x, b.y); octx.rotate(b.rot);
           octx.fillStyle = b.color;
-          octx.shadowBlur = 15;
-          octx.shadowColor = b.color;
-          if (b.type === 'circle') {
-            octx.beginPath(); octx.arc(0, 0, b.size, 0, Math.PI * 2); octx.fill();
-          } else if (b.type === 'star') {
-            octx.beginPath();
-            for(let i=0; i<10; i++) {
-              const r = i%2===0 ? b.size : b.size*0.4;
-              const a = i * Math.PI / 5;
-              octx.lineTo(Math.cos(a)*r, Math.sin(a)*r);
-            }
-            octx.fill();
-          } else {
-            octx.fillRect(-b.size/2, -b.size/2, b.size, b.size);
-          }
+          octx.shadowBlur = 10; octx.shadowColor = b.color;
+          if (b.type === 'circle') { octx.beginPath(); octx.arc(0,0,b.size,0,Math.PI*2); octx.fill(); }
+          else if (b.type === 'star') {
+            octx.beginPath(); for(let i=0; i<10; i++) { const r = i%2===0?b.size:b.size*0.4; const a=i*Math.PI/5; octx.lineTo(Math.cos(a)*r, Math.sin(a)*r); } octx.fill();
+          } else { octx.fillRect(-b.size/2, -b.size/2, b.size, b.size); }
           octx.restore();
         });
         octx.restore();
 
-        // Assemble Kaleidoscope
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, w, h);
-        ctx.save();
-        ctx.translate(w/2, h/2);
-        for (let i = 0; i < settings.segments; i++) {
-          ctx.save();
-          ctx.rotate(i * sliceAngle);
-          ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.arc(0, 0, radius, 0, sliceAngle + 0.005);
-          ctx.clip();
-          if (i % 2 === 1) {
-            ctx.scale(1, -1);
-            ctx.rotate(-sliceAngle);
-          }
+        // Final Render
+        ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
+        ctx.save(); ctx.translate(w/2, h/2);
+        for(let i=0; i<settings.segments; i++) {
+          ctx.save(); ctx.rotate(i * slice);
+          ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,radius,0,slice+0.01); ctx.clip();
+          if(i%2===1) { ctx.scale(1,-1); ctx.rotate(-slice); }
           ctx.drawImage(off, -radius, -radius);
           ctx.restore();
         }
         ctx.restore();
-
-        animationFrameRef.current = requestAnimationFrame(animate);
+        rafRef.current = requestAnimationFrame(animate);
       }, [settings]);
 
       useEffect(() => {
-        animationFrameRef.current = requestAnimationFrame(animate);
-        return () => cancelAnimationFrame(animationFrameRef.current);
+        rafRef.current = requestAnimationFrame(animate);
+        return () => cancelAnimationFrame(rafRef.current);
       }, [animate]);
 
-      return <canvas ref={canvasRef} onMouseDown={() => {
-        beadsRef.current.forEach(b => {
-          b.vx += (Math.random() - 0.5) * 20;
-          b.vy += (Math.random() - 0.5) * 20;
-        });
-      }} className="cursor-pointer" />;
+      return <canvas ref={canvasRef} onPointerDown={() => {
+        beadsRef.current.forEach(b => { b.vx += (Math.random()-0.5)*20; b.vy += (Math.random()-0.5)*20; });
+      }} />;
     };
 
     /** 
-     * --- MAIN APP ---
+     * --- APP ---
      */
     const App = () => {
+      const [started, setStarted] = useState(false);
       const [settings, setSettings] = useState({ segments: 12, zoom: 1.2 });
       const [palette, setPalette] = useState(["#FF0080", "#7928CA", "#FF4D4D", "#F9CB28", "#0070F3"]);
       const [videoStream, setVideoStream] = useState(null);
-      const [uiVisible, setUiVisible] = useState(true);
       const [isGenerating, setIsGenerating] = useState(false);
+      const [uiVisible, setUiVisible] = useState(true);
 
-      useEffect(() => {
+      const init = async () => {
+        // Request motion permissions for iOS
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+          try { await DeviceMotionEvent.requestPermission(); } catch (e) { console.error(e); }
+        }
+
         navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-          .then(setVideoStream)
-          .catch(err => {
-            console.warn("Camera denied, using black background.");
-          });
-      }, []);
+          .then(setVideoStream).catch(() => console.warn("Camera denied"));
+        
+        const handleMotion = (e) => {
+          const acc = e.accelerationIncludingGravity;
+          if (acc && (Math.abs(acc.x) > 15 || Math.abs(acc.y) > 15)) {
+            window.dispatchEvent(new CustomEvent('shake-detected'));
+          }
+        };
+        window.addEventListener('devicemotion', handleMotion);
+        setStarted(true);
+      };
 
-      const handleGenerate = async () => {
+      const handleTheme = async () => {
         setIsGenerating(true);
-        const theme = await getAIGeneratedTheme();
-        setPalette(theme.palette);
+        const res = await getAIGeneratedTheme();
+        setPalette(res.palette);
         setIsGenerating(false);
       };
 
+      if (!started) {
+        return (
+          <div className="fixed inset-0 flex flex-col items-center justify-center p-8 text-center start-overlay z-[100]">
+            <div className="mb-12">
+              <div className="w-24 h-24 mx-auto mb-6 flex items-center justify-center rounded-3xl bg-white/5 border border-white/10 shadow-2xl">
+                <i className="fas fa-gem text-4xl text-white"></i>
+              </div>
+              <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">Refractor</h1>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">AI Prismatic Engine</p>
+            </div>
+            <button 
+              onClick={init}
+              className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)]"
+            >
+              Start Experience
+            </button>
+            <p className="mt-8 text-[10px] opacity-30 uppercase font-bold max-w-[200px]">Requires Camera and Motion access for full experience</p>
+          </div>
+        );
+      }
+
       return (
-        <div className="relative w-full h-screen overflow-hidden bg-black text-white">
+        <div className="relative w-full h-screen overflow-hidden bg-black">
           <KaleidoscopeCanvas settings={settings} videoStream={videoStream} palette={palette} />
 
-          {/* UI Controls */}
-          <div className="absolute inset-x-0 bottom-10 px-6 pointer-events-none">
+          <div className="absolute inset-x-0 bottom-10 px-6 pointer-events-none z-50">
             <div className={`glass-panel max-w-md mx-auto rounded-[2.5rem] p-6 transition-all duration-700 pointer-events-auto ${uiVisible ? 'translate-y-0 opacity-100' : 'translate-y-32 opacity-0'}`}>
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h1 className="text-xl font-black italic tracking-tighter uppercase leading-none">Refractor</h1>
-                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Mobile Prismatic Lens</p>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Live Visualizer</p>
                 </div>
                 <div className="flex gap-2">
-                  <button 
-                    onClick={handleGenerate} 
-                    disabled={isGenerating}
-                    className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center shadow-lg active:scale-90 transition-transform disabled:opacity-50"
-                  >
+                  <button onClick={handleTheme} disabled={isGenerating} className="w-12 h-12 rounded-full bg-white text-black flex items-center justify-center shadow-lg active:scale-90 transition-transform disabled:opacity-50">
                     <i className={`fas fa-wand-magic-sparkles ${isGenerating ? 'animate-spin' : ''}`}></i>
                   </button>
-                  <button 
-                    onClick={() => setUiVisible(false)}
-                    className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90 transition-transform"
-                  >
+                  <button onClick={() => setUiVisible(false)} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90 transition-transform">
                     <i className="fas fa-eye-slash"></i>
                   </button>
                 </div>
@@ -340,55 +313,32 @@
 
               <div className="space-y-6">
                 <div className="space-y-2">
-                  <div className="flex justify-between text-[10px] uppercase font-black tracking-tighter opacity-50">
-                    <span>Symmetry / {settings.segments}</span>
-                    <i className="fas fa-layer-group"></i>
-                  </div>
-                  <input 
-                    type="range" min="4" max="24" step="2" 
-                    value={settings.segments} 
-                    onChange={e => setSettings(s => ({...s, segments: parseInt(e.target.value)}))}
-                    className="w-full"
-                  />
+                  <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>Symmetry / {settings.segments}</span></div>
+                  <input type="range" min="4" max="24" step="2" value={settings.segments} onChange={e => setSettings(s=>({...s, segments: parseInt(e.target.value)}))} className="w-full" />
                 </div>
                 <div className="space-y-2">
-                  <div className="flex justify-between text-[10px] uppercase font-black tracking-tighter opacity-50">
-                    <span>Magnification / {settings.zoom.toFixed(1)}x</span>
-                    <i className="fas fa-search-plus"></i>
-                  </div>
-                  <input 
-                    type="range" min="0.5" max="2.0" step="0.1" 
-                    value={settings.zoom} 
-                    onChange={e => setSettings(s => ({...s, zoom: parseFloat(e.target.value)}))}
-                    className="w-full"
-                  />
+                  <div className="flex justify-between text-[10px] uppercase font-black tracking-widest opacity-50"><span>Zoom / {settings.zoom.toFixed(1)}x</span></div>
+                  <input type="range" min="0.5" max="2.0" step="0.1" value={settings.zoom} onChange={e => setSettings(s=>({...s, zoom: parseFloat(e.target.value)}))} className="w-full" />
                 </div>
               </div>
-              
+
               <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-center gap-2">
                 <div className="shake-hint text-[9px] opacity-30 uppercase font-bold tracking-[0.2em]">
-                  <i className="fas fa-mobile-alt mr-2"></i> Shake device to mix
+                  <i className="fas fa-mobile-alt mr-2"></i> Shake or Tap to Tumble
                 </div>
               </div>
             </div>
 
             {!uiVisible && (
-              <button 
-                onClick={() => setUiVisible(true)}
-                className="pointer-events-auto absolute bottom-0 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-white text-black flex items-center justify-center shadow-2xl active:scale-90 transition-transform animate-bounce"
-              >
+              <button onClick={() => setUiVisible(true)} className="pointer-events-auto absolute bottom-0 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-white text-black flex items-center justify-center shadow-2xl active:scale-90 animate-bounce">
                 <i className="fas fa-eye"></i>
               </button>
             )}
           </div>
 
-          {/* Loading Overlay */}
           {isGenerating && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-10 h-10 border-2 border-white/10 border-t-white rounded-full animate-spin"></div>
-                <span className="text-[10px] font-black uppercase tracking-[0.4em] opacity-40">Gemini Refracting...</span>
-              </div>
+            <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+              <div className="w-8 h-8 border-2 border-white/10 border-t-white rounded-full animate-spin"></div>
             </div>
           )}
         </div>
