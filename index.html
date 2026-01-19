@@ -142,17 +142,14 @@
         let spawnX = 0;
         let spawnY = 0;
 
-        // 터치 좌표가 있는 경우(클릭/터치), 해당 위치를 중심으로 생성
         if (e && e.clientX !== undefined) {
           spawnX = e.clientX - rect.left - centerX;
           spawnY = e.clientY - rect.top - centerY;
         } else {
-          // 흔들기 이벤트 등 좌표가 없는 경우 중앙 근처에서 랜덤 생성
           spawnX = (Math.random() - 0.5) * 100;
           spawnY = (Math.random() - 0.5) * 100;
         }
 
-        // 생성 위치가 이미 반지름 밖이라면 안쪽으로 클램핑
         const dist = Math.hypot(spawnX, spawnY);
         if (dist > radius - 20) {
           const angle = Math.atan2(spawnY, spawnX);
@@ -166,7 +163,7 @@
           newBeads.push(createBead({
             x: spawnX,
             y: spawnY,
-            vx: (Math.random() - 0.5) * 6, // 생성 시 퍼져나가는 속도 강화
+            vx: (Math.random() - 0.5) * 6,
             vy: (Math.random() - 0.5) * 6,
             vRot: (Math.random() - 0.5) * 0.6 
           }));
@@ -244,7 +241,8 @@
           octx.translate(b.x, b.y); 
           octx.rotate(b.rot); 
           octx.globalAlpha = b.alpha;
-          octx.globalCompositeOperation = 'source-over';
+          // Set to 'overlay' as requested
+          octx.globalCompositeOperation = 'overlay';
           octx.fillStyle = b.color;
           octx.shadowBlur = 15; octx.shadowColor = b.color;
           
@@ -311,7 +309,6 @@
           if (acc && (Math.abs(acc.x) > 13 || Math.abs(acc.y) > 13)) {
             const canvas = document.querySelector('canvas');
             if(canvas) {
-              // 수동 이벤트 발생 시 handleAction이 중앙을 타겟팅하도록 유도
               canvas.dispatchEvent(new CustomEvent('pointerdown', { detail: { isShake: true } }));
             }
           }
@@ -327,7 +324,7 @@
                 <i className="fas fa-gem text-4xl text-white"></i>
               </div>
               <h1 className="text-4xl font-black italic tracking-tighter uppercase mb-2">Refractor</h1>
-              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Precision Spawning</p>
+              <p className="text-xs opacity-40 uppercase tracking-[0.4em] font-bold">Overlay Layer Mode</p>
             </div>
             <button onClick={init} className="px-12 py-4 rounded-full bg-white text-black font-black uppercase tracking-widest text-sm active:scale-95 transition-all shadow-[0_0_30px_rgba(255,255,255,0.3)]">
               Begin Refraction
@@ -345,7 +342,7 @@
               <div className="flex items-center justify-between mb-8">
                 <div>
                   <h1 className="text-xl font-black italic tracking-tighter uppercase leading-none">Refractor</h1>
-                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Tap to Spawn Gems</p>
+                  <p className="text-[10px] opacity-40 uppercase tracking-widest mt-1 font-bold">Overlay Blending</p>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => setUiVisible(false)} className="w-12 h-12 rounded-full bg-white/10 flex items-center justify-center border border-white/10 active:scale-90">
@@ -365,7 +362,7 @@
               </div>
               <div className="mt-8 pt-4 border-t border-white/5 flex items-center justify-center gap-2">
                 <div className="shake-hint text-[9px] opacity-30 uppercase font-bold tracking-[0.2em]">
-                  <i className="fas fa-fingerprint mr-2"></i> Touch anywhere to create
+                  <i className="fas fa-magic mr-2"></i> Blending: Overlay
                 </div>
               </div>
             </div>
